@@ -54,9 +54,11 @@ def get_credentials():
     return credentials
 
 
-def runSpeedTest():
-    speedtestOutput = subprocess.check_output(['/usr/local/bin/speedtest', '--simple']).split('\n')
-    # speedtestOutput = 'Ping: 37.37 ms\nDownload: 32.54 Mbit/s\nUpload: 5.67 Mbit/s\n'.split('\n')
+def runSpeedTest(fullTest):
+    if fullTest:
+        speedtestOutput = subprocess.check_output(['/usr/local/bin/speedtest', '--simple']).split('\n')
+    else:
+        speedtestOutput = 'Ping: --\nDownload: --\nUpload: --\n'.split('\n')
     output = {}
     for field in speedtestOutput:
         # print('field [' + str(field) + ']')
@@ -153,7 +155,7 @@ def main():
     # rangeName = 'Sheet1!A' + lastRow + ':E' + lastRow
     # print('Range name: ' + rangeName)
     requests = []
-    speedtestResult = runSpeedTest()
+    speedtestResult = runSpeedTest(rowNum % 10 == 0)
     requests.append(addRow(rowNum, speedtestResult))
     requests.append(setLastRow(rowNum))
     batchUpdateRequest = {'requests': requests}
