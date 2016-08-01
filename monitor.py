@@ -2,13 +2,20 @@
 from __future__ import print_function
 import datetime
 import httplib2
+import json
 import os
 import subprocess
+import sys
+import traceback
 
 from apiclient import discovery
 import oauth2client
 from oauth2client import client
 from oauth2client import tools
+
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 spreadsheetId = '1RU0hbJSlBBs_svv0XX__gt_gAuNveOs_s3a0DQHuVsM'
 
@@ -54,17 +61,22 @@ def get_credentials():
     return credentials
 
 
-def runSpeedTest(fullTest):
-    if fullTest:
-        speedtestOutput = subprocess.check_output(['/usr/local/bin/speedtest', '--simple']).split('\n')
-    else:
-        speedtestOutput = 'Ping: --\nDownload: --\nUpload: --\n'.split('\n')
-    output = {}
+def runConnectionTest():
+    output = {
+        'timestamp': str(datetime.datetime.now()),
+        'connected': 1 if subprocess.check_output(
+            ['./check-connection.sh']).split('\n')[0] == 'Online' else 0}
+    return output
+
+
+def runSpeedTest():
+    speedtestOutput = subprocess.check_output(['/usr/local/bin/speedtest', '--simple']).split('\n')
+    output = {'timestamp': str(datetime.datetime.now())}
     for field in speedtestOutput:
         # print('field [' + str(field) + ']')
         if(field.strip() != ''):
             (name, val) = field.split(':')
-            output[name] = val.strip()
+            output[name] = val.strip().split(' ')[0]
     return output
 
 
@@ -86,13 +98,35 @@ def getRange(rangeName):
     return result.get('values', [])
 
 
-def now_epoch_days():
-    # epoch = datetime.datetime.utcfromtimestamp(0).total_seconds()
-    epoch = 123
-    return str(epoch)
+def connectionTestRow(connectionTestOutput):
+    return {
+        'values': [
+            {
+                'userEnteredValue': {'stringValue': connectionTestOutput['timestamp']}
+            }, {
+                'userEnteredValue': {'numberValue': connectionTestOutput['connected']}
+            }
+        ]
+    }
 
 
-def addRow(rowNum, speedtestResult):
+def speedTestRow(timestamp, download, upload, ping):
+    return {
+        'values': [
+            {
+                'userEnteredValue': {'stringValue': timestamp}
+            }, {
+                'userEnteredValue': {'numberValue': download}
+            }, {
+                'userEnteredValue': {'numberValue': upload}
+            }, {
+                'userEnteredValue': {'numberValue': ping}
+            }
+        ]
+    }
+
+
+def setRows(rowNum, rows):
     return {
         'updateCells': {
             'start': {
@@ -100,24 +134,38 @@ def addRow(rowNum, speedtestResult):
                 'rowIndex': rowNum - 1,
                 'columnIndex': 0
             },
-            'rows': [
-                {
-                    'values': [
-                        {
-                            'userEnteredValue': {'stringValue': str(datetime.datetime.now())}
-                        }, {
-                            'userEnteredValue': {'stringValue': speedtestResult['Download']}
-                        }, {
-                            'userEnteredValue': {'stringValue': speedtestResult['Upload']}
-                        }, {
-                            'userEnteredValue': {'stringValue': speedtestResult['Ping']}
-                        }
-                    ]
-                }
-            ],
+            'rows': rows,
             'fields': 'userEnteredValue'
         }
     }
+
+
+# def addRow(rowNum, speedtestResult):
+#     return {
+#         'updateCells': {
+#             'start': {
+#                 'sheetId': 0,
+#                 'rowIndex': rowNum - 1,
+#                 'columnIndex': 0
+#             },
+#             'rows': [
+#                 {
+#                     'values': [
+#                         {
+#                             'userEnteredValue': {'stringValue': str(datetime.datetime.now())}
+#                         }, {
+#                             'userEnteredValue': {'stringValue': speedtestResult['Download']}
+#                         }, {
+#                             'userEnteredValue': {'stringValue': speedtestResult['Upload']}
+#                         }, {
+#                             'userEnteredValue': {'stringValue': speedtestResult['Ping']}
+#                         }
+#                     ]
+#                 }
+#             ],
+#             'fields': 'userEnteredValue'
+#         }
+#     }
 
 
 def setLastRow(rowNum):
@@ -143,36 +191,41 @@ def setLastRow(rowNum):
 
 
 def main():
-    """Shows basic usage of the Sheets API.
-
-    Creates a Sheets API service object and prints the names and majors of
-    students in a sample spreadsheet:
-    https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
+    """Monitor internet connection, saving results to Google spreadsheet
     """
-    # values = getRange('Sheet1!A2:E')
-    rowNum = int(getRange('Sheet1!G1')[0][0]) + 1
-    # print('Last row: ' + lastRow[0][0])
-    # rangeName = 'Sheet1!A' + lastRow + ':E' + lastRow
-    # print('Range name: ' + rangeName)
-    requests = []
-    speedtestResult = runSpeedTest(rowNum % 10 == 0)
-    requests.append(addRow(rowNum, speedtestResult))
-    requests.append(setLastRow(rowNum))
-    batchUpdateRequest = {'requests': requests}
-    getService().spreadsheets().batchUpdate(spreadsheetId=spreadsheetId,
-                                            body=batchUpdateRequest).execute()
+    # Cell to store last row used
+    # Because the point of this is to test for connection failures,
+    # we must expect saving to the Google spreadsheet will fail, so
+    # test results must be queued to disk locally.
+    thisResult = runConnectionTest()
+    results = [thisResult]  # getLocallyQueuedResults().append(thisResult)
+    try:
+        rowNum = int(getRange('Sheet1!G1')[0][0]) + 1
+        # print('A' * 60)
+        # print(json.dumps())
+        requests = [setRows(rowNum, map(lambda result: connectionTestRow(result), results))]
+        requests.append(setLastRow(rowNum))
 
-#    values = getRange(rangeName)
-#
-#    if not values:
-#        print('No data found.')
-#    else:
-#        print('Last row of values')
-#        for row in values:
-#            for col in row:
-#                print('%s ' % (col))
-#
-#    print(createUpdateItem('potato', 'abc'))
+        # results.append(setLastRow(rowNum))
+        # requests = setRows(rowNum, results)
+        batchUpdateRequest = {'requests': requests}
+        # print('-' * 60)
+        # print(json.dumps(batchUpdateRequest))
+        # print('-' * 60)
+        getService().spreadsheets().batchUpdate(spreadsheetId=spreadsheetId,
+                                                body=batchUpdateRequest).execute()
+        # clearLocalResults()
+        # rowNum = int(getRange('Sheet1!G1')[0][0]) + 1
+        # speedtestResult = runSpeedTest(rowNum % 10 == 0)
+        # saveResultsLocally(requests)
+    except Exception as e:
+        # saveResultsLocally(queuedResults)
+        # print(json.dumps(requests))
+        eprint('ERROR: ' + str(e))
+        traceback.print_exc(file=sys.stderr)
+        # DEAL WITH IT HERE
+    # requests.append(addRow(rowNum, speedtestResult))
+    # requests.append(setLastRow(rowNum))
 
 if __name__ == '__main__':
     main()
