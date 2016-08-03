@@ -197,9 +197,9 @@ def main():
     # Because the point of this is to test for connection failures,
     # we must expect saving to the Google spreadsheet will fail, so
     # test results must be queued to disk locally.
-    thisResult = runConnectionTest()
-    results = [thisResult]  # getLocallyQueuedResults().append(thisResult)
     try:
+        thisResult = runConnectionTest()
+        results = [thisResult]  # getLocallyQueuedResults().append(thisResult)
         rowNum = int(getRange('Sheet1!G1')[0][0]) + 1
         # print('A' * 60)
         # print(json.dumps())
@@ -218,7 +218,9 @@ def main():
         # rowNum = int(getRange('Sheet1!G1')[0][0]) + 1
         # speedtestResult = runSpeedTest(rowNum % 10 == 0)
         # saveResultsLocally(requests)
+        print('{} - {}'.format(thisResult['timestamp'], 'Up' if thisResult['connected'] else 'Down'))
     except Exception as e:
+        print('{} - ERROR: {}'.format(datetime.datetime.now(), e))
         # saveResultsLocally(queuedResults)
         # print(json.dumps(requests))
         eprint('ERROR: ' + str(e))
