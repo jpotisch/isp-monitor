@@ -30,6 +30,7 @@ except ImportError:
 SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME = 'Google Sheets API Python Quickstart'
+RESULT_QUEUE_FILE = 'resultQueue.txt'
 
 
 def get_credentials():
@@ -98,14 +99,18 @@ def getRange(rangeName):
     return result.get('values', [])
 
 
-def connectionTestRow(connectionTestOutput):
+def connectionTestRow(result):
+    """Results are stored in form {timestamp}, {success}, {failure}
+    """
     return {
         'values': [
             {
-                'userEnteredValue': {'stringValue': connectionTestOutput['timestamp']}
+                'userEnteredValue': {'stringValue': result['timestamp']}
             }, {
-                'userEnteredValue': {'numberValue': connectionTestOutput['connected']}
-            }
+                'userEnteredValue': {'numberValue': 1}
+            } if result['connected'] == 1 else {}, {
+                'userEnteredValue': {'numberValue': 1}
+            } if result['connected'] == 0 else {}
         ]
     }
 
@@ -127,6 +132,8 @@ def speedTestRow(timestamp, download, upload, ping):
 
 
 def setRows(rowNum, rows):
+    """Create Google Sheets API payload to set a range of cells
+    """
     return {
         'updateCells': {
             'start': {
@@ -140,35 +147,10 @@ def setRows(rowNum, rows):
     }
 
 
-# def addRow(rowNum, speedtestResult):
-#     return {
-#         'updateCells': {
-#             'start': {
-#                 'sheetId': 0,
-#                 'rowIndex': rowNum - 1,
-#                 'columnIndex': 0
-#             },
-#             'rows': [
-#                 {
-#                     'values': [
-#                         {
-#                             'userEnteredValue': {'stringValue': str(datetime.datetime.now())}
-#                         }, {
-#                             'userEnteredValue': {'stringValue': speedtestResult['Download']}
-#                         }, {
-#                             'userEnteredValue': {'stringValue': speedtestResult['Upload']}
-#                         }, {
-#                             'userEnteredValue': {'stringValue': speedtestResult['Ping']}
-#                         }
-#                     ]
-#                 }
-#             ],
-#             'fields': 'userEnteredValue'
-#         }
-#     }
-
-
 def setLastRow(rowNum):
+    """Store the last row number used in its own cell so we know where to
+    insert our row(s) next time
+    """
     return {
         'updateCells': {
             'start': {
@@ -190,44 +172,79 @@ def setLastRow(rowNum):
     }
 
 
+def getQueuedResults():
+    """Returns array of queued test result JSON objects
+    """
+    if os.path.exists(RESULT_QUEUE_FILE):
+        with open(RESULT_QUEUE_FILE, 'r') as file:
+            return map(lambda line: json.loads(line), file.read().splitlines())
+    else:
+        return []
+
+
+def queueResult(thisResult):
+    """Append test result to the queue if we could not upload this time
+    """
+    if thisResult:
+        with open(RESULT_QUEUE_FILE, 'a') as file:
+            file.write(json.dumps(thisResult) + '\n')
+        return True
+    else:
+        return False
+
+
+def clearResultQueue():
+    """Clear queued test results after successful upload
+    """
+    with open(RESULT_QUEUE_FILE, 'w') as file:
+        return True
+
+
+def sendResultsToGoogle(results):
+    """Turn results (array of JSON test result objects) into Google Sheets
+    API request and submit it.
+    """
+    # get last row number used
+    lastRow = int(getRange('Sheet1!G1')[0][0])
+
+    # generate request array to insert result(s) one row after last
+    requests = [setRows(lastRow + 1, map(lambda result: connectionTestRow(result), results))]
+    # increment last row number by total rows added
+    requests.append(setLastRow(lastRow + len(results)))
+
+    # submit request
+    batchUpdateRequest = {'requests': requests}
+    getService().spreadsheets().batchUpdate(spreadsheetId=spreadsheetId,
+                                            body=batchUpdateRequest).execute()
+    return True
+
+
 def main():
     """Monitor internet connection, saving results to Google spreadsheet
     """
-    # Cell to store last row used
     # Because the point of this is to test for connection failures,
     # we must expect saving to the Google spreadsheet will fail, so
-    # test results must be queued to disk locally.
+    # in case of failure, test results are queued for next time
+    thisResult = None
     try:
         thisResult = runConnectionTest()
-        results = [thisResult]  # getLocallyQueuedResults().append(thisResult)
-        rowNum = int(getRange('Sheet1!G1')[0][0]) + 1
-        # print('A' * 60)
-        # print(json.dumps())
-        requests = [setRows(rowNum, map(lambda result: connectionTestRow(result), results))]
-        requests.append(setLastRow(rowNum))
 
-        # results.append(setLastRow(rowNum))
-        # requests = setRows(rowNum, results)
-        batchUpdateRequest = {'requests': requests}
-        # print('-' * 60)
-        # print(json.dumps(batchUpdateRequest))
-        # print('-' * 60)
-        getService().spreadsheets().batchUpdate(spreadsheetId=spreadsheetId,
-                                                body=batchUpdateRequest).execute()
-        # clearLocalResults()
-        # rowNum = int(getRange('Sheet1!G1')[0][0]) + 1
-        # speedtestResult = runSpeedTest(rowNum % 10 == 0)
-        # saveResultsLocally(requests)
+        # Retrieve any results queued from previous network failures
+        allResults = getQueuedResults() + [thisResult]
+
+        # Attempt to save to Google spreadsheet
+        sendResultsToGoogle(allResults)
+
+        # If we made it this far it worked, so clear the queue
+        clearResultQueue()
+
+        # Output result
         print('{} - {}'.format(thisResult['timestamp'], 'Up' if thisResult['connected'] else 'Down'))
     except Exception as e:
+        # Append test result (if any) to queue of pending results
+        queueResult(thisResult)
         print('{} - ERROR: {}'.format(datetime.datetime.now(), e))
-        # saveResultsLocally(queuedResults)
-        # print(json.dumps(requests))
-        eprint('ERROR: ' + str(e))
         traceback.print_exc(file=sys.stderr)
-        # DEAL WITH IT HERE
-    # requests.append(addRow(rowNum, speedtestResult))
-    # requests.append(setLastRow(rowNum))
 
 if __name__ == '__main__':
     main()
