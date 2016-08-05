@@ -46,8 +46,9 @@ def get_credentials():
     credential_dir = os.path.join(home_dir, '.credentials')
     if not os.path.exists(credential_dir):
         os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir,
-                                   'sheets.googleapis.com-python-quickstart.json')
+    credential_path = os.path.join(
+        credential_dir,
+        'sheets.googleapis.com-python-quickstart.json')
 
     store = oauth2client.file.Storage(credential_path)
     credentials = store.get()
@@ -63,15 +64,18 @@ def get_credentials():
 
 
 def runConnectionTest():
+    result = 1 if subprocess.check_output(
+        ['./check-connection.sh']).split('\n')[0] == 'Online' else 0
     output = {
-        'timestamp': str(datetime.datetime.now()),
-        'connected': 1 if subprocess.check_output(
-            ['./check-connection.sh']).split('\n')[0] == 'Online' else 0}
+        'start': str(datetime.datetime.now()),
+        'up': result,
+        'down': 1 - result}
     return output
 
 
 def runSpeedTest():
-    speedtestOutput = subprocess.check_output(['/usr/local/bin/speedtest', '--simple']).split('\n')
+    speedtestOutput = subprocess.check_output(['/usr/local/bin/speedtest',
+                                               '--simple']).split('\n')
     output = {'timestamp': str(datetime.datetime.now())}
     for field in speedtestOutput:
         # print('field [' + str(field) + ']')
@@ -100,17 +104,20 @@ def getRange(rangeName):
 
 
 def connectionTestRow(result):
-    """Results are stored in form {timestamp}, {success}, {failure}
+    """Results are stored in form
+    {start}, {end}, {success count}, {failure count}
     """
     return {
         'values': [
             {
-                'userEnteredValue': {'stringValue': result['timestamp']}
+                'userEnteredValue': {'stringValue': result['start']}
             }, {
-                'userEnteredValue': {'numberValue': 1}
-            } if result['connected'] == 1 else {}, {
-                'userEnteredValue': {'numberValue': 1}
-            } if result['connected'] == 0 else {}
+                'userEnteredValue': {'stringValue': result['end']}
+            }, {
+                'userEnteredValue': {'numberValue': result['up']}
+            }, {
+                'userEnteredValue': {'numberValue': result['down']}
+            }
         ]
     }
 
@@ -155,7 +162,7 @@ def setLastRow(rowNum):
         'updateCells': {
             'start': {
                 'sheetId': 0,
-                'rowIndex': 0,
+                'rowIndex': 1,
                 'columnIndex': 6
             },
             'rows': [
@@ -200,17 +207,59 @@ def clearResultQueue():
         return True
 
 
+def collapseResults(results):
+    """Instead of one row per result, collapse by outcome, e.g. 30 consecutive
+    successes = one row with 30 in success column. This will make results far
+    more compact and readable
+    """
+    collapsedResults = []
+    lastResult = None
+    for result in results:
+        if lastResult and ((result['up'] > 0 and lastResult['up'] > 0) or
+                           (result['down'] > 0 and lastResult['down'] > 0)):
+            lastResult = collapsedResults[len(collapsedResults) - 1]
+            lastResult['up'] += result['up']
+            lastResult['down'] += result['down']
+        else:
+            lastResult = result
+            collapsedResults = collapsedResults + [result]
+        lastResult['end'] = result['start']
+    return collapsedResults
+
+
 def sendResultsToGoogle(results):
     """Turn results (array of JSON test result objects) into Google Sheets
     API request and submit it.
     """
     # get last row number used
-    lastRow = int(getRange('Sheet1!G1')[0][0])
+    lastRowNum = int(getRange('Sheet1!G2')[0][0])
+
+    collapsedResults = collapseResults(results)
+
+    # get last row from sheet
+    lastRow = getRange('Sheet1!A{0}:D{0}'.format(lastRowNum))[0]
+    # destructure it
+    (lastStart, lastEnd, lastUp, lastDown) = lastRow
+    # force blanks to zero
+    lastUp = int(lastUp or 0)
+    lastDown = int(lastDown or 0)
+
+    # if same result as last time (up or down), merge saved values into
+    # queued results and insert one row higher than planned to overwrite
+    # that row in the sheet
+    if (lastUp > 0 and collapsedResults[0]['up'] > 0) or \
+            (lastDown > 0 and collapsedResults[0]['down'] > 0):
+        collapsedResults[0]['start'] = lastStart
+        collapsedResults[0]['up'] += lastUp
+        collapsedResults[0]['down'] += lastDown
+        lastRowNum = lastRowNum - 1  # rewind one row to overwrite
 
     # generate request array to insert result(s) one row after last
-    requests = [setRows(lastRow + 1, map(lambda result: connectionTestRow(result), results))]
+    requests = [setRows(lastRowNum + 1,
+                        map(lambda result:
+                            connectionTestRow(result), collapsedResults))]
     # increment last row number by total rows added
-    requests.append(setLastRow(lastRow + len(results)))
+    requests.append(setLastRow(lastRowNum + len(collapsedResults)))
 
     # submit request
     batchUpdateRequest = {'requests': requests}
@@ -239,7 +288,8 @@ def main():
         clearResultQueue()
 
         # Output result
-        print('{} - {}'.format(thisResult['timestamp'], 'Up' if thisResult['connected'] else 'Down'))
+        print('{} - {}'.format(thisResult['start'],
+                               'Up' if thisResult['up'] else 'Down'))
     except Exception as e:
         # Append test result (if any) to queue of pending results
         queueResult(thisResult)
