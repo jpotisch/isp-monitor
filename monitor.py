@@ -67,7 +67,7 @@ def runConnectionTest():
     result = 1 if subprocess.check_output(
         ['./check-connection.sh']).split('\n')[0] == 'Online' else 0
     output = {
-        'start': str(datetime.datetime.now()),
+        'start': datetime.datetime.now(),
         'up': result,
         'down': 1 - result}
     return output
@@ -103,6 +103,11 @@ def getRange(rangeName):
     return result.get('values', [])
 
 
+def dateToEpoch(d):
+    delta = d - datetime.datetime(1899, 12, 30, 0, 0)
+    return delta.total_seconds() / (3600 * 24)
+
+
 def connectionTestRow(result):
     """Results are stored in form
     {start}, {end}, {success count}, {failure count}
@@ -110,9 +115,9 @@ def connectionTestRow(result):
     return {
         'values': [
             {
-                'userEnteredValue': {'stringValue': result['start']}
+                'userEnteredValue': {'numberValue': dateToEpoch(result['start'])}
             }, {
-                'userEnteredValue': {'stringValue': result['end']}
+                'userEnteredValue': {'numberValue': dateToEpoch(result['end'])}
             }, {
                 'userEnteredValue': {'numberValue': result['up']}
             }, {
@@ -182,11 +187,16 @@ def setLastRow(rowNum):
 def getQueuedResults():
     """Returns array of queued test result JSON objects
     """
+    output = []
     if os.path.exists(RESULT_QUEUE_FILE):
         with open(RESULT_QUEUE_FILE, 'r') as file:
-            return map(lambda line: json.loads(line), file.read().splitlines())
-    else:
-        return []
+            for line in file.read().splitlines():
+                raw = json.loads(line)
+                raw['start'] = datetime.datetime.strptime(raw['start'], '%Y-%m-%dT%H:%M:%S.%f')
+                if 'end' in raw:
+                    raw['end'] = datetime.datetime.strptime(raw['end'], '%Y-%m-%dT%H:%M:%S.%f')
+                output += [raw]
+    return output
 
 
 def queueResult(thisResult):
@@ -194,10 +204,17 @@ def queueResult(thisResult):
     """
     if thisResult:
         with open(RESULT_QUEUE_FILE, 'a') as file:
-            file.write(json.dumps(thisResult) + '\n')
+            file.write(json.dumps(thisResult, default=json_serial) + '\n')
         return True
     else:
         return False
+
+
+def json_serial(obj):
+    if isinstance(obj, datetime.datetime):
+        serial = obj.isoformat()
+        return serial
+    raise TypeError('Type not serializable')
 
 
 def clearResultQueue():
@@ -249,7 +266,7 @@ def sendResultsToGoogle(results):
     # that row in the sheet
     if (lastUp > 0 and collapsedResults[0]['up'] > 0) or \
             (lastDown > 0 and collapsedResults[0]['down'] > 0):
-        collapsedResults[0]['start'] = lastStart
+        collapsedResults[0]['start'] = datetime.datetime.strptime(lastStart, '%m/%d/%Y %H:%M:%S')
         collapsedResults[0]['up'] += lastUp
         collapsedResults[0]['down'] += lastDown
         lastRowNum = lastRowNum - 1  # rewind one row to overwrite
