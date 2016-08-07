@@ -204,6 +204,10 @@ def deserializeTestResult(textResult):
     return output
 
 
+def serializeTestResult(testResult):
+    return json.dumps(testResult, default=json_serial)
+
+
 def getQueuedResults():
     """Returns array of queued test result JSON objects
     """
@@ -219,7 +223,7 @@ def queueResult(thisResult):
     """
     if thisResult:
         with open(RESULT_QUEUE_FILE, 'a') as file:
-            file.write(json.dumps(thisResult, default=json_serial) + '\n')
+            file.write(serializeTestResult(thisResult) + '\n')
         return True
     else:
         return False
