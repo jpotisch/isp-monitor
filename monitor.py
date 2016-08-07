@@ -210,6 +210,8 @@ def getQueuedResults():
     if os.path.exists(RESULT_QUEUE_FILE):
         with open(RESULT_QUEUE_FILE, 'r') as file:
             return map(lambda line: deserializeTestResult(line), file.read().splitlines())
+    else:
+        return []
 
 
 def queueResult(thisResult):
