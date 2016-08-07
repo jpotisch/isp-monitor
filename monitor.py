@@ -193,19 +193,23 @@ def setLastRow(rowNum):
     }
 
 
+def deserializeTestResult(textResult):
+    """Encapsulate any transformations here when reading queued result
+    """
+    output = json.loads(textResult)
+    isoDates = ['start', 'end']
+    for date in isoDates:
+        if date in output:
+            output[date] = iso8601stringToDate(output[date])
+    return output
+
+
 def getQueuedResults():
     """Returns array of queued test result JSON objects
     """
-    output = []
     if os.path.exists(RESULT_QUEUE_FILE):
         with open(RESULT_QUEUE_FILE, 'r') as file:
-            for line in file.read().splitlines():
-                raw = json.loads(line)
-                raw['start'] = iso8601stringToDate(raw['start'])
-                if 'end' in raw:
-                    raw['end'] = iso8601stringToDate(raw['end'])
-                output += [raw]
-    return output
+            return map(lambda line: deserializeTestResult(line), file.read().splitlines())
 
 
 def queueResult(thisResult):
