@@ -108,6 +108,15 @@ def dateToEpoch(d):
     return delta.total_seconds() / (3600 * 24)
 
 
+def iso8601stringToDate(d):
+    """Parse ISO8601 datetime string (with optional milliseconds) to date
+    """
+    # strptime requires milliseconds, so add if not present
+    if '.' not in d:
+        d += '.000000'
+    return datetime.datetime.strptime(d, '%Y-%m-%dT%H:%M:%S.%f')
+
+
 def connectionTestRow(result):
     """Results are stored in form
     {start}, {end}, {success count}, {failure count}
@@ -192,9 +201,9 @@ def getQueuedResults():
         with open(RESULT_QUEUE_FILE, 'r') as file:
             for line in file.read().splitlines():
                 raw = json.loads(line)
-                raw['start'] = datetime.datetime.strptime(raw['start'], '%Y-%m-%dT%H:%M:%S.%f')
+                raw['start'] = iso8601stringToDate(raw['start'])
                 if 'end' in raw:
-                    raw['end'] = datetime.datetime.strptime(raw['end'], '%Y-%m-%dT%H:%M:%S.%f')
+                    raw['end'] = iso8601stringToDate(raw['end'])
                 output += [raw]
     return output
 
