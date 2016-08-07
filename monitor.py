@@ -111,7 +111,7 @@ def dateToEpoch(d):
 def iso8601stringToDate(d):
     """Parse ISO8601 datetime string (with optional milliseconds) to date
     """
-    # strptime requires milliseconds, so add if not present
+    # our strptime format requires milliseconds, so add if not present
     if '.' not in d:
         d += '.000000'
     return datetime.datetime.strptime(d, '%Y-%m-%dT%H:%M:%S.%f')
