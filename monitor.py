@@ -313,6 +313,7 @@ def main():
     thisResult = None
     try:
         thisResult = runConnectionTest()
+        thisTestStart = thisResult['start'].replace(microsecond=0)
 
         # Retrieve any results queued from previous network failures
         allResults = getQueuedResults() + [thisResult]
@@ -324,7 +325,7 @@ def main():
         clearResultQueue()
 
         # Output result
-        print('{} - {}'.format(thisResult['start'],
+        print('{} - {}'.format(thisTestStart,
                                'Up' if thisResult['up'] else 'Down'))
     except Exception as e:
         # Append test result (if any) to queue of pending results
